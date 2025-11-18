@@ -32,6 +32,7 @@ bool readInaValues(InaValues &values)
   values.vBus        = ina228.readBusVoltage();
   values.temperature = ina228.readDieTemp();
   values.current_mA  = ina228.getCurrent_mA();
+  values.energyWs    = ina228.readEnergy();
 
   return true;
 }
@@ -56,6 +57,7 @@ void setup()
     ina228.setTemperatureConversionTime(INA228_TIME_1052_us);
     ina228.setMode(INA228_MODE_CONTINUOUS);
     ina228.setShunt(INA228_SHUNT_OHMS);
+    ina228.resetAccumulators();
     Serial.println(F("INA228 init OK"));
     inaReady = true;
   }
@@ -72,9 +74,7 @@ void loop()
 {
   static unsigned long lastMeasurement = 0;
   if (millis() - lastMeasurement < 500)
-  {
     return;
-  }
 
   lastMeasurement = millis();
 
@@ -83,10 +83,10 @@ void loop()
 
   if (ok)
   {
-    Serial.printf("Vbus=%.3f V, Vshunt=%.6f V, Temp=%.2f C, I=%.2f mA\n",
+    Serial.printf("Vbus=%.3f V, Vshunt=%.6f V, Temp=%.2f C, I=%.2f mA, E=%.3f W*s\n",
                   values.vBus, values.vShunt, values.temperature,
-                  values.current_mA);
-    webInterface.updateMeasurements(values.vBus, values.vShunt, values.temperature, values.current_mA);
+                  values.current_mA, values.energyWs);
+    webInterface.updateMeasurements(values);
   }
   else
   {

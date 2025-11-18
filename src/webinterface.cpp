@@ -1,20 +1,26 @@
 #include "webinterface.h"
 
+#include "ina_values.h"
+#include "value_format.h"
+#include <math.h>
+
 WebInterface::WebInterface()
     : m_server(80)
     , m_lastMeasurementHtml(F("<h1>Power Meter</h1><p>No measurements yet.</p>"))
     , m_webReady(false)
     , m_connected(false)
     , m_localIp()
+    , m_lastEnergyWs(NAN)
 {
 }
 
 String WebInterface::buildPage() const
 {
   String html;
-  html.reserve(256);
-  html += F("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Power Meter</title>");
-  html += F("<style>body{font-family:sans-serif;margin:1.5em;}h1{font-size:1.5em;}table{border-collapse:collapse;}td{padding:0.25em 0.5em;border:1px solid #ccc;}</style>");
+  html.reserve(384);
+  html += F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta http-equiv='refresh' content='1'>"
+            "<title>Power Meter</title>");
+  html += F("<style>body{font-family:sans-serif;margin:1.5em;}h1{font-size:1.5em;}table{border-collapse:collapse;margin-bottom:1em;}td,th{padding:0.25em 0.5em;border:1px solid #ccc;}th{text-align:left;background:#f7f7f7;}td:last-child{text-align:right;}</style>");
   html += F("</head><body>");
   html += m_lastMeasurementHtml;
 
@@ -68,32 +74,49 @@ bool WebInterface::begin(const char *ssid, const char *password)
   return true;
 }
 
-void WebInterface::updateMeasurements(float vBus, float vShunt, float temperature, float current_mA)
+void WebInterface::updateMeasurements(const InaValues &values)
 {
+  const float deltaWh = max((!isnan(m_lastEnergyWs)) ? (values.energyWs - m_lastEnergyWs) / 3600.0f : 0.0f, 0.0f);
+  const float totalWh = values.energyWs / 3600.0f;
+
+  const String currentStr     = formatValue(values.current_mA / 1000.0f, "A", 5);
+  const String deltaEnergyStr = formatValue(deltaWh, "Wh", 5);
+  const String totalEnergyStr = formatValue(totalWh, "Wh", 5);
+  const String vbusStr        = formatValue(values.vBus, "V", 3);
+
+  String tempStr;
+  tempStr.reserve(12);
+  tempStr += String(values.temperature, 1);
+  tempStr += F(" C");
+
   m_lastMeasurementHtml = F("<h1>Power Meter</h1>");
-  m_lastMeasurementHtml += F("<table>");
+  m_lastMeasurementHtml += F("<table><tr><th colspan='2'>Last measurement</th></tr>");
 
   auto addRow =
-      [&](const __FlashStringHelper *label, float value, uint8_t decimals, const __FlashStringHelper *unit)
+      [&](const __FlashStringHelper *label, const String &value)
       {
         String row;
         row.reserve(64);
         row += F("<tr><td>");
         row += label;
         row += F("</td><td>");
-        row += String(value, decimals);
-        row += F("</td><td>");
-        row += unit;
+        row += value;
         row += F("</td></tr>");
         m_lastMeasurementHtml += row;
       };
 
-  addRow(F("Vbus"), vBus, 3, F("V"));
-  addRow(F("Vshunt"), vShunt, 6, F("V"));
-  addRow(F("Temp"), temperature, 2, F("C"));
-  addRow(F("Current"), current_mA, 2, F("mA"));
+  addRow(F("Current"), currentStr);
+  addRow(F("Energy"), deltaEnergyStr);
+  addRow(F("Vbus"), vbusStr);
+  addRow(F("Temp"), tempStr);
 
   m_lastMeasurementHtml += F("</table>");
+
+  m_lastMeasurementHtml += F("<table><tr><th colspan='2'>Total energy</th></tr>");
+  addRow(F("Energy"), totalEnergyStr);
+  m_lastMeasurementHtml += F("</table>");
+
+  m_lastEnergyWs = values.energyWs;
 }
 
 void WebInterface::loop()

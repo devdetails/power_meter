@@ -20,4 +20,5 @@ public:
 private:
   Adafruit_SH1107 m_display;
   bool            m_ready;
+  float           m_lastEnergyWs;
 };

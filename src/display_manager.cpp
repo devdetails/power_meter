@@ -1,17 +1,21 @@
 #include "display_manager.h"
 
 #include "ina_values.h"
+#include "value_format.h"
+#include <math.h>
 
 namespace
 {
-constexpr uint8_t  SH1107_ADDR   = 0x3C;
-constexpr uint16_t SH1107_WIDTH  = 128;
-constexpr uint16_t SH1107_HEIGHT = 128;
+  constexpr uint8_t  SH1107_ADDR   = 0x3C;
+  constexpr uint16_t SH1107_WIDTH  = 128;
+  constexpr uint16_t SH1107_HEIGHT = 128;
+  constexpr uint8_t  lineHeight    = 8; // please adjust if you change font
 }
 
 DisplayManager::DisplayManager()
     : m_display(SH1107_HEIGHT, SH1107_WIDTH, &Wire, -1)
     , m_ready(false)
+    , m_lastEnergyWs(NAN)
 {
 }
 
@@ -38,13 +42,20 @@ bool DisplayManager::begin()
 void DisplayManager::showConnecting(const char *ssid)
 {
   if (!m_ready)
-  {
     return;
-  }
 
   m_display.clearDisplay();
-  m_display.setCursor(0, 0);
-  m_display.print(F("connecting to "));
+  m_display.setCursor(0, lineHeight*3);
+  m_display.println(F("connecting to"));
+  
+  // print ssid in font size 2 if possible
+  int16_t x1, y1; uint16_t w, h; 
+  m_display.setTextSize(2);
+  m_display.getTextBounds(ssid, 0, 0, &x1, &y1, &w, &h);
+
+  if (w > m_display.width())
+    m_display.setTextSize(1);
+
   m_display.println(ssid);
   m_display.display();
 }
@@ -61,27 +72,52 @@ void DisplayManager::showMeasurements(const InaValues &values, bool sensorOk, bo
 
   if (!sensorOk)
   {
+    m_display.setTextSize(1);
     m_display.println(F("INA228 error"));
   }
   else
   {
-    m_display.println(F("INA228 values"));
-    m_display.print(F("Vbus : "));
-    m_display.print(values.vBus, 2);
-    m_display.println(F(" V"));
-    m_display.print(F("Vshunt: "));
-    m_display.print(values.vShunt, 4);
-    m_display.println(F(" V"));
-    m_display.print(F("Temp : "));
+    // last current and energy measurement
+    m_display.setTextSize(1);
+    m_display.println("Current");
+    m_display.setCursor(0, m_display.getCursorY() + lineHeight / 2);
+
+    const String currentStr = formatValue(values.current_mA / 1000.0f, "A", 5);
+    float deltaWh = max((!isnan(m_lastEnergyWs)) ? (values.energyWs - m_lastEnergyWs) / 3600.0f : 0.0f, 0.0f);
+    float totalWh = values.energyWs / 3600.0f;
+
+    const String deltaEnergyStr = formatValue(deltaWh, "Wh", 5);
+    const String energyStr = formatValue(totalWh, "Wh", 5);
+
+    m_display.setTextSize(2);
+    m_display.println(currentStr);
+    m_display.println(deltaEnergyStr);
+
+    // total accumulated energy
+    m_display.setCursor(0, m_display.getCursorY() + lineHeight * 2);
+    m_display.setTextSize(1);
+    m_display.println("Total");
+    m_display.setCursor(0, m_display.getCursorY() + lineHeight / 2);
+
+    m_display.setTextSize(2);
+    m_display.println(energyStr);
+    m_display.println("");
+
+    // vbus, die temp and IP address on botton
+    m_display.setCursor(0, SH1107_HEIGHT - 3 * lineHeight);
+    m_display.setTextSize(1);
+    m_display.print(F("Vbus: "));
+    m_display.println(formatValue(values.vBus, "V", 3));
+    m_display.print(F("Temp: "));
     m_display.print(values.temperature, 1);
     m_display.println(F(" C"));
-    m_display.print(F("Ishunt: "));
-    m_display.print(values.current_mA, 2);
-    m_display.println(F(" mA"));
+
+    m_lastEnergyWs = values.energyWs;
   }
 
-  m_display.setCursor(0, SH1107_HEIGHT - 8);
-  m_display.print(F("IP: "));
+  m_display.setCursor(0, SH1107_HEIGHT - lineHeight);
+  m_display.setTextSize(1);
+  m_display.print(F("IP:   "));
   if (webConnected)
   {
     m_display.print(ip.toString());

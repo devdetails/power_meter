@@ -4,6 +4,8 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 
+struct InaValues;
+
 class WebInterface
 {
 public:
@@ -12,7 +14,7 @@ public:
   bool begin(const char *ssid, const char *password);
   IPAddress localIp() const;
   bool isConnected() const;
-  void updateMeasurements(float vBus, float vShunt, float temperature, float current_mA);
+  void updateMeasurements(const InaValues &values);
   void loop();
 
 private:
@@ -23,4 +25,5 @@ private:
   bool             m_webReady;
   bool             m_connected;
   IPAddress        m_localIp;
+  float            m_lastEnergyWs;
 };

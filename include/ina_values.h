@@ -6,4 +6,5 @@ struct InaValues
   float vBus;
   float temperature;
   float current_mA;
+  float energyWs;
 };
