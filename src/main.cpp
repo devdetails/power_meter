@@ -13,6 +13,11 @@ constexpr int SCL_PIN = D1;
 constexpr uint8_t INA228_ADDR       = 0x40;   // A0 = GND
 constexpr float   INA228_SHUNT_OHMS = 0.33;   // shunt resistance
 
+// 0.05 Ohm shunt
+// Resolution: LSB=6.25uA  for ADCRANGE=0 and LSB=1.56uA  for ADCRANGE=1
+// Saturates:  MAX=3.2768A for ADCRANGE=0 and MAX=0.8192A for ADCRANGE=1
+
+
 Adafruit_INA228 ina228;
 bool            inaReady = false;
 
@@ -51,6 +56,7 @@ void setup()
   }
   else
   {
+    ina228.setADCRange(0);
     ina228.setAveragingCount(INA228_COUNT_128);
     ina228.setCurrentConversionTime(INA228_TIME_1052_us);
     ina228.setVoltageConversionTime(INA228_TIME_1052_us);
