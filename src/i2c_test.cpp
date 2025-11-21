@@ -26,15 +26,15 @@ void scanI2C()
 
     if (error == 0) 
     {
-      Serial.print("I2C device found at 0x");
-      if (address < 16) Serial.print("0");
+      Serial.print(F("I2C device found at 0x"));
+      if (address < 16) Serial.print('0');
       Serial.println(address, HEX);
       nDevices++;
     }
   }
 
-  if (nDevices == 0) Serial.println("No I2C devices found");
-  else               Serial.println("Scan complete");
+  if (nDevices == 0) Serial.println(F("No I2C devices found"));
+  else               Serial.println(F("Scan complete"));
   Serial.println();
 }
 
@@ -57,7 +57,7 @@ bool readInaValues(InaValues &values)
   if (!inaReady) 
     return false;
 
-  values.vShunt      = ina228.readShuntVoltage();
+  values.vShunt      = ina228.readShuntVoltage() / 1000.0f;
   values.vBus        = ina228.readBusVoltage();
   values.temperature = ina228.readDieTemp();
   values.current_mA  = ina228.getCurrent_mA();
@@ -105,7 +105,7 @@ void setup()
   Wire.begin(SDA_PIN, SCL_PIN);
   Wire.setClock(400000);
 
-  Serial.println("\nI2C scanner started...");
+  Serial.println(F("\nI2C scanner started..."));
   scanI2C();
 
   if (!ina228.begin(INA228_ADDR, &Wire)) 
@@ -126,7 +126,7 @@ void setup()
 
   if (!display.begin(SH1107_ADDR, false)) 
   {
-    Serial.println("SH1107 OLED could not be initialized.");
+    Serial.println(F("SH1107 OLED could not be initialized."));
   } 
   else 
   {
