@@ -27,7 +27,6 @@ namespace
 DisplayManager::DisplayManager()
     : m_display(SH1107_HEIGHT, SH1107_WIDTH, &Wire, -1)
     , m_ready(false)
-    , m_lastEnergyWs(NAN)
 {
 }
 
@@ -72,7 +71,7 @@ void DisplayManager::showConnecting(const char *ssid)
   m_display.display();
 }
 
-void DisplayManager::showMeasurements(const InaValues &values, bool sensorOk, bool webConnected, const IPAddress &ip,
+void DisplayManager::showMeasurements(const InaValues &values, float deltaEnergyWs, bool sensorOk, bool webConnected, const IPAddress &ip,
                                       const MeasurementHistory &history, DisplayMode mode)
 {
   if (!m_ready)
@@ -97,9 +96,8 @@ void DisplayManager::showMeasurements(const InaValues &values, bool sensorOk, bo
     m_display.setCursor(0, m_display.getCursorY() + lineHeight / 2);
 
     const String currentStr = formatValue(values.current_mA / 1000.0f, "A", 5);
-    float        deltaWs    = max((!isnan(m_lastEnergyWs)) ? values.energyWs - m_lastEnergyWs : 0.0f, 0.0f);
-
-    const String intervalEnergyStr = formatValue(deltaWs         / 3600.0f, "Wh", 5);
+  
+    const String intervalEnergyStr = formatValue(deltaEnergyWs   / 3600.0f, "Wh", 5);
     const String totalEnergyStr    = formatValue(values.energyWs / 3600.0f, "Wh", 5);
 
     m_display.setTextSize(2);
@@ -124,13 +122,10 @@ void DisplayManager::showMeasurements(const InaValues &values, bool sensorOk, bo
     m_display.print(F("Temp: "));
     m_display.print(values.temperature, 1);
     m_display.println(F(" C"));
-
-    m_lastEnergyWs = values.energyWs;
   }
   else
   {
     showGraph(history, mode);
-    m_lastEnergyWs = values.energyWs;
   }
 
   if (mode == DisplayMode::Summary)

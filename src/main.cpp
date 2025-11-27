@@ -13,10 +13,11 @@ constexpr int SDA_PIN = D2;
 constexpr int SCL_PIN = D1;
 
 constexpr uint8_t INA228_ADDR       = 0x40;   // A0 = GND
-constexpr float   INA228_SHUNT_OHMS = 0.33;   // shunt resistance
+constexpr float   INA228_SHUNT_OHMS = 0.015;  // shunt resistance
 constexpr uint8_t BUTTON_PIN        = 0;      // GPIO0
+constexpr uint8_t INA_ALERT_PIN     = D5;     // GPIO14
 
-constexpr unsigned long MEASUREMENT_INTERVAL_MS = 500;
+constexpr unsigned long UPDATE_INTERVAL_MS = 500;
 constexpr unsigned long BUTTON_DEBOUNCE_MS      = 50;
 
 // 0.05 Ohm shunt
@@ -27,12 +28,71 @@ constexpr unsigned long BUTTON_DEBOUNCE_MS      = 50;
 Adafruit_INA228    ina228;
 bool               inaReady = false;
 
+volatile uint32_t  inaAlertCount      = 0;
+InaValues          lastMeasuredValues = {};
+bool               lastMeasurementOk  = false;
+
 WebInterface       webInterface;
 IPAddress          webIp;
 bool               webConnected = false;
 DisplayManager     displayManager;
 MeasurementHistory measurementHistory;
 DisplayMode        displayMode = DisplayMode::Summary;
+
+struct MeasurementAccumulator
+{
+  float     vShuntSum      = 0.0f;
+  float     vBusSum        = 0.0f;
+  float     temperatureSum = 0.0f;
+  float     currentSum     = 0.0f;
+  float     totalEnergyWs  = 0.0f;
+  uint32_t  count          = 0;
+
+  void add(const InaValues &values)
+  {
+    vShuntSum      += values.vShunt;
+    vBusSum        += values.vBus;
+    temperatureSum += values.temperature;
+    currentSum     += values.current_mA;
+    totalEnergyWs   = values.energyWs;
+
+    ++count;
+  }
+
+  void reset()
+  {
+    vShuntSum      = 0.0f;
+    vBusSum        = 0.0f;
+    temperatureSum = 0.0f;
+    currentSum     = 0.0f;
+    totalEnergyWs  = 0.0f;
+    count          = 0;
+  }
+
+  bool hasData() const
+  {
+    return count > 0;
+  }
+
+  InaValues average() const
+  {
+    InaValues averaged{};
+
+    if (count > 0)
+    {
+      const float invCount = 1.0f / static_cast<float>(count);
+      averaged.vShunt      = vShuntSum      * invCount;
+      averaged.vBus        = vBusSum        * invCount;
+      averaged.temperature = temperatureSum * invCount;
+      averaged.current_mA  = currentSum     * invCount;
+      averaged.energyWs    = totalEnergyWs; // keep the latest accumulated energy
+    }
+
+    return averaged;
+  }
+};
+
+MeasurementAccumulator measurementAccumulator;
 
 void handleButton()
 {
@@ -87,12 +147,48 @@ bool readInaValues(InaValues &values)
   return true;
 }
 
+void IRAM_ATTR onInaAlert()
+{
+  ++inaAlertCount;
+}
+
+void processInaAlerts()
+{
+  if (!inaReady)
+  {
+    return;
+  }
+
+  uint32_t alerts = 0;
+  noInterrupts();
+  alerts        = inaAlertCount;
+  inaAlertCount = 0;
+  interrupts();
+
+  if (alerts == 0)
+  {
+    return;
+  }
+
+  // INA228 doesn't buffer multiple conversions, so one read gets latest data.
+  InaValues values{};
+  if (readInaValues(values))
+  {
+    measurementAccumulator.add(values);
+  }
+
+  // Reading alert flags clears the CONV_READY alert so it can fire again.
+  ina228.alertFunctionFlags();
+}
+
 void setup()
 {
   Serial.begin(115200);
   delay(50);
 
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_PIN,    INPUT_PULLUP);
+  pinMode(INA_ALERT_PIN, INPUT_PULLUP);
+
   Wire.begin(SDA_PIN, SCL_PIN);
   Wire.setClock(400000);
 
@@ -103,15 +199,20 @@ void setup()
   else
   {
     ina228.setADCRange(0);
-    ina228.setAveragingCount(INA228_COUNT_128);
-    ina228.setCurrentConversionTime(INA228_TIME_1052_us);
-    ina228.setVoltageConversionTime(INA228_TIME_1052_us);
+    ina228.setAveragingCount(INA228_COUNT_64);
+    ina228.setCurrentConversionTime(INA228_TIME_4120_us);
+    ina228.setVoltageConversionTime(INA228_TIME_4120_us);
     ina228.setTemperatureConversionTime(INA228_TIME_1052_us);
     ina228.setMode(INA228_MODE_CONTINUOUS);
+    ina228.setAlertPolarity(INA228_ALERT_POLARITY_INVERTED);
+    ina228.setAlertLatch(INA228_ALERT_LATCH_TRANSPARENT);
+    ina228.setAlertType(INA228_ALERT_CONVERSION_READY);
     ina228.setShunt(INA228_SHUNT_OHMS);
     ina228.resetAccumulators();
     Serial.println(F("INA228 init OK"));
     inaReady = true;
+
+    attachInterrupt(digitalPinToInterrupt(INA_ALERT_PIN), onInaAlert, FALLING);
   }
 
   displayManager.begin();
@@ -119,43 +220,83 @@ void setup()
 
   webConnected = webInterface.begin(secrets::WIFI_SSID, secrets::WIFI_PASSWORD);
   webIp        = webInterface.localIp();
+
+  lastMeasurementOk = readInaValues(lastMeasuredValues);
 }
 
 
 void loop()
 {
   handleButton();
+  processInaAlerts();
 
-  static unsigned long lastMeasurement = 0;
-  const unsigned long  now             = millis();
+  static unsigned long lastUpdate   = 0;
+  static float         lastEnergyWs = lastMeasuredValues.energyWs;
+  const unsigned long  now          = millis();
 
-  if (now - lastMeasurement >= MEASUREMENT_INTERVAL_MS)
+  if (now - lastUpdate >= UPDATE_INTERVAL_MS)
   {
-    lastMeasurement = now;
+    uint32_t sampleCount = measurementAccumulator.count;
 
-    InaValues values{};
-    bool      ok = readInaValues(values);
-
-    if (ok)
+    if (measurementAccumulator.hasData())
     {
-      measurementHistory.addMeasurement(values.current_mA, values.energyWs,
-                                        static_cast<float>(millis()) / 1000.0f);
-      Serial.printf("Vbus=%s Vshunt=%s Temp=%.2f C I=%s E=%s\n",
-                    formatValue(values.vBus, "V", 5).c_str(),
-                    formatValue(values.vShunt, "V", 5).c_str(),
-                    values.temperature,
-                    formatValue(values.current_mA / 1000.0f, "A", 5).c_str(),
-                    formatValue(values.energyWs / 3600.0f, "Wh", 5).c_str());
-      webInterface.updateMeasurements(values);
+      float prevEnergyWs = lastMeasuredValues.energyWs;
+      lastMeasuredValues = measurementAccumulator.average();
+
+      lastEnergyWs = lastMeasuredValues.energyWs - prevEnergyWs;
+      measurementHistory.addMeasurement(lastMeasuredValues.current_mA, lastMeasuredValues.energyWs, static_cast<float>(now) / 1000.0f);
+
+      measurementAccumulator.reset();
+      lastMeasurementOk = true;
+
+      // Get fluctuation metrics from measurement history
+      size_t historyCount = measurementHistory.count();
+      if (historyCount >= 2)
+      {
+        MeasurementHistory::CurrentStats stats = measurementHistory.getCurrentStats();
+        float fluctuation = stats.maxCurrent - stats.minCurrent;
+        float stdDevPercent = (stats.meanCurrent > 0.0f) ? (stats.stdDeviation / stats.meanCurrent) * 100.0f : 0.0f;
+        float rangePercent = (stats.meanCurrent > 0.0f) ? (fluctuation / stats.meanCurrent) * 100.0f : 0.0f;
+
+        Serial.printf("[avg %lu] Vbus=%s Vshunt=%s Temp=%.2f C I=%s E=%s | I-stddev=%.1f%% I-range=%.1f%%\n",
+                      static_cast<unsigned long>(sampleCount),
+                      formatValue(lastMeasuredValues.vBus,   "V", 5).c_str(),
+                      formatValue(lastMeasuredValues.vShunt, "V", 5).c_str(),
+                      lastMeasuredValues.temperature,
+                      formatValue(lastMeasuredValues.current_mA / 1000.0f, "A", 5).c_str(),
+                      formatValue(lastMeasuredValues.energyWs / 3600.0f, "Wh", 5).c_str(),
+                      stdDevPercent,
+                      rangePercent);
+      }
+      else
+      {
+        Serial.printf("[avg %lu] Vbus=%s Vshunt=%s Temp=%.2f C I=%s E=%s (insufficient history for fluctuation)\n",
+                      static_cast<unsigned long>(sampleCount),
+                      formatValue(lastMeasuredValues.vBus,   "V", 5).c_str(),
+                      formatValue(lastMeasuredValues.vShunt, "V", 5).c_str(),
+                      lastMeasuredValues.temperature,
+                      formatValue(lastMeasuredValues.current_mA / 1000.0f, "A", 5).c_str(),
+                      formatValue(lastMeasuredValues.energyWs / 3600.0f, "Wh", 5).c_str());
+      }
     }
     else
     {
+      Serial.printf("[avg %lu] No measurements in this cycle\n", static_cast<unsigned long>(sampleCount));
+    }
+
+    webInterface.updateMeasurements(lastMeasuredValues);
+    displayManager.showMeasurements(lastMeasuredValues, lastEnergyWs, lastMeasurementOk, webConnected, webIp, measurementHistory, displayMode);
+    
+   
+    if (!lastMeasurementOk)
+    {                       
       Serial.println(F("Error reading INA228"));
     }
 
     webConnected = webInterface.isConnected();
     webIp        = webInterface.localIp();
-    displayManager.showMeasurements(values, ok, webConnected, webIp, measurementHistory, displayMode);
+
+    lastUpdate = now;
   }
 
   webInterface.loop();

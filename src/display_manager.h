@@ -23,7 +23,7 @@ public:
 
   bool begin();
   void showConnecting(const char *ssid);
-  void showMeasurements(const InaValues &values, bool sensorOk, bool webConnected, const IPAddress &ip,
+  void showMeasurements(const InaValues &values, float deltaEnergyWs, bool sensorOk, bool webConnected, const IPAddress &ip,
                         const MeasurementHistory &history, DisplayMode mode);
 
 private:
@@ -43,7 +43,6 @@ private:
 
   Adafruit_SH1107 m_display;
   bool            m_ready;
-  float           m_lastEnergyWs;
   GraphScaleState m_currentScale;
   GraphScaleState m_energyScale;
 };

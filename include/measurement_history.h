@@ -52,6 +52,51 @@ public:
     return m_count;
   }
 
+  struct CurrentStats
+  {
+    float minCurrent;
+    float maxCurrent;
+    float meanCurrent;
+    float stdDeviation;
+  };
+
+  CurrentStats getCurrentStats() const
+  {
+    CurrentStats stats = {0.0f, 0.0f, 0.0f, 0.0f};
+
+    if (m_count == 0)
+      return stats;
+
+    // Single pass: compute min, max, sum, and sum of squares
+    float minVal = m_current[0];
+    float maxVal = m_current[0];
+    float sum    = m_current[0];
+    float sumSq  = m_current[0] * m_current[0];
+
+    for (size_t i = 1; i < m_count; ++i)
+    {
+      const float val = m_current[i];
+
+      if (val < minVal) minVal = val;
+      if (val > maxVal) maxVal = val;
+
+      sum   += val;
+      sumSq += val * val;
+    }
+
+    stats.minCurrent  = minVal;
+    stats.maxCurrent  = maxVal;
+    stats.meanCurrent = sum / static_cast<float>(m_count);
+
+    if (m_count >= 2)
+    {
+      const float variance = (sumSq / static_cast<float>(m_count)) - (stats.meanCurrent * stats.meanCurrent);
+      stats.stdDeviation   = sqrt(variance > 0.0f ? variance : 0.0f);
+    }
+
+    return stats;
+  }
+
 private:
   size_t copyBuffer(const float *src, float *dest, size_t maxCount) const
   {
