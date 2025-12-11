@@ -40,7 +40,7 @@ bool DisplayManager::begin()
   }
 
   m_display.clearDisplay();
-  m_display.setRotation(3); // 90 deg counter-clockwise
+  m_display.setRotation(1); // 90 deg counter-clockwise
   m_display.setTextSize(1);
   m_display.setTextColor(SH110X_WHITE);
   m_display.setCursor(0, 0);

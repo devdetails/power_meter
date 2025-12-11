@@ -67,11 +67,10 @@ public:
     if (m_count == 0)
       return stats;
 
-    // Single pass: compute min, max, sum, and sum of squares
+    // First pass: compute min, max, and mean
     float minVal = m_current[0];
     float maxVal = m_current[0];
     float sum    = m_current[0];
-    float sumSq  = m_current[0] * m_current[0];
 
     for (size_t i = 1; i < m_count; ++i)
     {
@@ -80,18 +79,24 @@ public:
       if (val < minVal) minVal = val;
       if (val > maxVal) maxVal = val;
 
-      sum   += val;
-      sumSq += val * val;
+      sum += val;
     }
 
     stats.minCurrent  = minVal;
     stats.maxCurrent  = maxVal;
     stats.meanCurrent = sum / static_cast<float>(m_count);
 
+    // Second pass: compute variance using numerically stable method
     if (m_count >= 2)
     {
-      const float variance = (sumSq / static_cast<float>(m_count)) - (stats.meanCurrent * stats.meanCurrent);
-      stats.stdDeviation   = sqrt(variance > 0.0f ? variance : 0.0f);
+      float varianceSum = 0.0f;
+      for (size_t i = 0; i < m_count; ++i)
+      {
+        const float diff = m_current[i] - stats.meanCurrent;
+        varianceSum += diff * diff;
+      }
+      const float variance = varianceSum / static_cast<float>(m_count);
+      stats.stdDeviation = sqrt(variance > 0.0f ? variance : 0.0f);
     }
 
     return stats;
